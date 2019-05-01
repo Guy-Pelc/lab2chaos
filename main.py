@@ -109,18 +109,18 @@ def get_map_data(maxima_rows):
     return maxima_rows
 
 
-def fit_map_function(map_data):
+def fit_map_function(map_data, range_min=-1.0, range_max=11.0):
     """
     Plots graphs relating to the map function.
     :param map_data: a dataframe of maximum rows with a column of previous maximum value
+    :param range_min: the minimum of the range on which to plot the map function.
+    :param range_max: the maximum of that range.
     (like output of get_map_data)
     """
-    # FOR FITTING ONLY THE BELLY OF THE MAP FUNCTION
-    map_data = map_data[(map_data[PREV_MAX] > 0.5) & (map_data[PREV_MAX] < 5.5)]
+    map_data = map_data[(map_data[PREV_MAX] >= range_min) & (map_data[PREV_MAX] <= range_max)]
     x = map_data[PREV_MAX]
     y = map_data[DIODE_V]
     coeffs = np.polyfit(x, y, deg=2)
-    print(coeffs)
     fit_x = np.arange(np.min(x), np.max(x), (np.max(x) - np.min(x)) / POINTS_FOR_FIT)
     fit_y = np.polyval(coeffs, fit_x)
     plt.scatter(x, y, c='red', s=4)
@@ -130,11 +130,10 @@ def fit_map_function(map_data):
     plt.ylabel("Voltage at Peak (V)")
 
 
-
 if __name__ == "__main__":
     #df = pd.read_csv(FOLDER_ADDRESS + "/" + FILE_ADDRESS + ".csv")
     data = extract_raw_data("./data/9_5v30khz.csv")
     maxima = get_maxima(data)
     map_data = get_map_data(maxima)
-    fit_map_function(map_data)
+    fit_map_function(map_data, 0.5, 5.5)
     plt.show()
