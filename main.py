@@ -11,15 +11,16 @@ FOLDER_ADDRESS = "week 2"
 FILE_ADDRESS = "100mV"
 MAX_ROWS = 1000000
 ORDER = 500
+POINTS_FOR_FIT = 10000
 
-TIME_COL_NAME = 'time'
-GEN_VOL_COL_NAME = 'gen_v'
-DIODE_VOL_COL_NAME = 'diode_v'
-PREV_MAX_COL_NAME = 'prev_max'
+TIME = 'time'
+GEN_V = 'gen_v'
+DIODE_V = 'diode_v'
+PREV_MAX = 'prev_max'
 
-# Maxima filtering parameters
-MAXIMA_TIMEDIFF_BINS = 20
-MAXIMA_TIMEDIFF_QUANTILE_BAR = 0.2
+# # Maxima filtering parameters
+# MAXIMA_TIMEDIFF_BINS = 20
+# MAXIMA_TIMEDIFF_QUANTILE_BAR = 0.2
 
 
 def extract_raw_data(filename):
@@ -29,16 +30,16 @@ def extract_raw_data(filename):
     and 'diode_v' which is the voltage on the diode.
     """
     raw_data = pd.read_csv(filename)
-    data = pd.DataFrame({TIME_COL_NAME: raw_data.iloc[:, 3],
-                         GEN_VOL_COL_NAME: raw_data.iloc[:, 4],
-                         DIODE_VOL_COL_NAME: raw_data.iloc[:, 10]})
+    data = pd.DataFrame({TIME: raw_data.iloc[:, 3],
+                         GEN_V: raw_data.iloc[:, 4],
+                         DIODE_V: raw_data.iloc[:, 10]})
     subsample_rate = np.ceil(data.shape[0] / MAX_ROWS)
     data = data.iloc[::subsample_rate, :]
     return data
 
 
 def plot_raw_data(df):
-    plt.plot(df[TIME_COL_NAME], df[DIODE_VOL_COL_NAME])
+    plt.plot(df[TIME], df[DIODE_V])
     plt.show()
 
 
@@ -60,15 +61,21 @@ def filter_maxima(maxima_rows):
 
 
 def display_data(data ,maxima_rows):
-    disp_df = data[(data[TIME_COL_NAME] > 0) & (data[TIME_COL_NAME] < 0.002)]
-    disp_maxima = maxima_rows[(maxima_rows[TIME_COL_NAME] > 0) & (maxima_rows[TIME_COL_NAME] < 0.002)]
-    plt.plot(disp_df[TIME_COL_NAME], disp_df[DIODE_VOL_COL_NAME], linewidth=0.5)
-    plt.scatter(disp_maxima[TIME_COL_NAME], disp_maxima[DIODE_VOL_COL_NAME], s=4, c='red')
+    """
+    Displays data for manual verification of peak detection.
+    :param data: the basic dataframe of voltage and
+    :param maxima_rows:
+    :return:
+    """
+    disp_df = data[(data[TIME] > 0) & (data[TIME] < 0.002)]
+    disp_maxima = maxima_rows[(maxima_rows[TIME] > 0) & (maxima_rows[TIME] < 0.002)]
+    plt.plot(disp_df[TIME], disp_df[DIODE_V], linewidth=0.5)
+    plt.scatter(disp_maxima[TIME], disp_maxima[DIODE_V], s=4, c='red')
     plt.suptitle("Data Segment With Detected Maxima")
     plt.xlabel("Time (s)")
     plt.ylabel("Voltage (V)")
     plt.show()
-    timediffs = maxima_rows[TIME_COL_NAME].diff().fillna(0)
+    timediffs = maxima_rows[TIME].diff().fillna(0)
     plt.hist(timediffs, rwidth=0.5)
     plt.suptitle("Histogram of Time Difference Between Maxima")
     plt.xlabel("Time Difference Between Consecutive Peaks (s)")
@@ -77,26 +84,57 @@ def display_data(data ,maxima_rows):
 
 
 def get_maxima(df):
-    peak_indices = argrelextrema(df[DIODE_VOL_COL_NAME].values, np.greater_equal, order = ORDER)[0]
-    #peak_indices = find_peaks_cwt(df[DIODE_VOL_COL_NAME], np.arange(1, 10))
+    """
+    Returns the data rows containing the detected maxima.
+    :param df: a dataframe of time and voltages of generator and diode.
+    :return: a similar dataframe for rows detected as peaks.
+    """
+    min_val = np.min(df[DIODE_V])
+    # Makes diode_v relative to the minimum voltage measured in each measurement.
+    df[DIODE_V] = df[DIODE_V] - min_val
+    peak_indices = argrelextrema(df[DIODE_V].values, np.greater_equal, order=ORDER)[0]
     maxima_rows = df.iloc[peak_indices]
-    display_data(df, maxima_rows)
     return maxima_rows
 
 
-def get_map_function(maxima_rows):
-    maxima_rows[PREV_MAX_COL_NAME] = maxima_rows[DIODE_VOL_COL_NAME].shift()
+def get_map_data(maxima_rows):
+    """
+    Returns a dataframe of maxima rows, with a column of previous maximum values.
+    Each row is a datapoint for the map function.
+    """
+    maxima_rows[PREV_MAX] = maxima_rows[DIODE_V].shift()
+    maxima_rows = maxima_rows[maxima_rows[DIODE_V] != maxima_rows[PREV_MAX]]
     # Ignores first row
     maxima_rows = maxima_rows.iloc[1:, :]
-    plt.scatter(maxima_rows[PREV_MAX_COL_NAME], maxima_rows[DIODE_VOL_COL_NAME], c='red', s=4)
+    return maxima_rows
+
+
+def fit_map_function(map_data):
+    """
+    Plots graphs relating to the map function.
+    :param map_data: a dataframe of maximum rows with a column of previous maximum value
+    (like output of get_map_data)
+    """
+    # FOR FITTING ONLY THE BELLY OF THE MAP FUNCTION
+    map_data = map_data[(map_data[PREV_MAX] > 0.5) & (map_data[PREV_MAX] < 5.5)]
+    x = map_data[PREV_MAX]
+    y = map_data[DIODE_V]
+    coeffs = np.polyfit(x, y, deg=2)
+    print(coeffs)
+    fit_x = np.arange(np.min(x), np.max(x), (np.max(x) - np.min(x)) / POINTS_FOR_FIT)
+    fit_y = np.polyval(coeffs, fit_x)
+    plt.scatter(x, y, c='red', s=4)
+    plt.plot(fit_x, fit_y, linewidth=0.5)
     plt.suptitle("Measured Map Function")
     plt.xlabel("Voltage at Previous Peak (V)")
     plt.ylabel("Voltage at Peak (V)")
-    plt.show()
+
 
 
 if __name__ == "__main__":
     #df = pd.read_csv(FOLDER_ADDRESS + "/" + FILE_ADDRESS + ".csv")
-    data = extract_raw_data("./data/7_1v30khz.csv")
+    data = extract_raw_data("./data/9_5v30khz.csv")
     maxima = get_maxima(data)
-    get_map_function(maxima)
+    map_data = get_map_data(maxima)
+    fit_map_function(map_data)
+    plt.show()
